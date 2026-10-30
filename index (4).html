@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ClubOS - Gestión de Clubes y Capítulos Estudiantiles</title>
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script src="https://unpkg.com/lucide@0.469.0/dist/umd/lucide.min.js"></script>
+<style type="text/tailwindcss">
+:root{--a1:#8b5cf6;--a2:#6366f1}
+@layer components{
+.card{@apply rounded-2xl border border-white/10 bg-white/5 backdrop-blur-xl shadow-xl shadow-black/30}
+.btn{@apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition active:scale-95 disabled:opacity-40}
+.btn-p{@apply btn text-white shadow-lg hover:brightness-110;background:linear-gradient(135deg,var(--a1),var(--a2))}
+.btn-g{@apply btn border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10}
+.inp{@apply w-full rounded-xl border border-white/10 bg-slate-900/70 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 outline-none}
+.inp:focus{border-color:var(--a1)}
+.grad{background:linear-gradient(135deg,var(--a1),var(--a2))}
+.soft{background:color-mix(in srgb,var(--a1) 16%,transparent)}
+.bd-a{border-color:color-mix(in srgb,var(--a1) 45%,transparent)}
+.tx-a{color:color-mix(in srgb,var(--a1) 65%,white)}
+}
+.pane{animation:in .35s ease both}@keyframes in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.bar{transition:width .8s cubic-bezier(.2,.8,.2,1)}
+</style></head>
+<body class="min-h-screen bg-slate-950 text-slate-200 antialiased">
+<div class="pointer-events-none fixed inset-0 -z-10 overflow-hidden"><div class="absolute -left-32 -top-32 h-96 w-96 rounded-full opacity-25 blur-3xl transition-colors duration-700" style="background:var(--a1)"></div><div class="absolute -bottom-32 -right-24 h-96 w-96 rounded-full opacity-20 blur-3xl transition-colors duration-700" style="background:var(--a2)"></div></div>
+
+<main id="login" class="flex min-h-screen items-center justify-center p-4">
+ <form class="card pane w-full max-w-md space-y-4 p-8" onsubmit="login(event)">
+  <div class="text-center"><div class="grad mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl"><i data-lucide="hexagon" class="text-white"></i></div>
+   <h1 class="text-2xl font-bold text-white">ClubOS</h1><p class="text-sm text-slate-400">Gestión de Clubes y Capítulos Estudiantiles</p></div>
+  <input id="u" class="inp" placeholder="Usuario (ej. taws)" autocomplete="username" oninput="detect()">
+  <p id="det" class="-mt-2 min-h-[1.25rem] text-xs text-emerald-300"></p>
+  <input id="p" type="password" class="inp" placeholder="Contraseña" autocomplete="current-password">
+  <p id="err" class="hidden text-sm text-rose-400">Credenciales no reconocidas.</p>
+  <button class="btn-p w-full">Ingresar</button>
+  <div class="flex gap-2"><select id="gorg" class="inp !w-36" aria-label="Organización"></select><button type="button" onclick="enter('inv',$('#gorg').value)" class="btn flex-1 border border-emerald-400/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"><i data-lucide="eye" class="h-4 w-4"></i>Ingresar como Invitado</button></div>
+  <div class="border-t border-white/10 pt-3 text-xs text-slate-500"><p class="mb-2">Demo (toca para autocompletar; agrega <b>.mie</b> al usuario para entrar como Miembro):</p><div id="chips" class="flex flex-wrap gap-1"></div></div>
+ </form>
+</main>
+
+<div id="app" class="mx-auto hidden max-w-7xl p-4">
+ <header class="card mb-4 flex flex-wrap items-center justify-between gap-3 p-3">
+  <div class="flex items-center gap-3"><div id="orgbar" class="flex items-center gap-3"></div></div>
+  <div class="flex flex-wrap items-center gap-2">
+   <span id="conn" class="text-xs"></span>
+   <label class="flex items-center gap-1 text-xs text-slate-400"><i data-lucide="repeat" class="h-3.5 w-3.5"></i>Simular rol
+    <select id="rolesel" onchange="enter(this.value)" class="inp !w-auto !py-1 text-xs"><option value="dir">Directivo</option><option value="mie">Miembro</option><option value="inv">Invitado</option></select></label>
+   <div id="me" class="flex items-center gap-2"></div>
+   <button class="btn-g !px-3" onclick="logout()" title="Salir" aria-label="Salir"><i data-lucide="log-out" class="h-4 w-4"></i></button>
+  </div>
+ </header>
+ <div class="grid gap-4 md:grid-cols-[13rem_1fr]">
+  <nav id="nav" class="card flex gap-1 overflow-x-auto p-2 md:flex-col md:self-start"></nav>
+  <section id="pane" class="min-w-0"></section>
+ </div>
+</div>
+<div id="modal" class="fixed inset-0 z-50 hidden items-center justify-center p-4"></div>
+
+<script>
+const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),sleep=ms=>new Promise(r=>setTimeout(r,ms));
+/* ---------- Capa API (FastAPI). Los endpoints marcados * aún no existen en el backend ---------- */
+const API={base:'',diag:[],async conectar(){API.diag=[];for(const b of ['','http://localhost:8000','http://127.0.0.1:8000']){try{const r=await fetch(b+'/api/dashboard');API.diag.push((b||'mismo origen')+' → HTTP '+r.status);if(r.ok&&(r.headers.get('content-type')||'').includes('json')){API.base=b;return true}}catch{API.diag.push((b||'mismo origen')+' → sin respuesta')}}return false},async j(u,o){const r=await fetch(API.base+u,o),j=await r.json().catch(()=>({})),d=j.detail;if(!r.ok)throw Error(Array.isArray(d)?d.map(x=>x.msg).join('; '):d||r.status);return j},
+ dashboard:id=>API.j('/api/dashboard?club='+id),correo:()=>API.j('/api/correo/estado'),upload:(fd,soloFlyer)=>API.j(soloFlyer?'/upload/flyer':'/upload/chat',{method:'POST',body:fd}),
+ postular:d=>API.j('/api/postulaciones',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)})/* * */};
+/* ---------- Configuración de organizaciones (identidad + datos semilla mínimos) ---------- */
+const P=s=>{const[name,g,cargo,t]=s.split('|');return{name,g,cargo,w:{dir:3,mie:2,inv:0}[g],tareas:t?t.split(';').map(d=>({descripcion:d,auto:false})):[]}};
+const ORGS={
+taws:{id:'taws',n:'TAWS',tipo:'Club',area:'Investigación Web y Ciencia de Datos',ic:'database',c:['#8b5cf6','#6366f1'],pw:'taws123',extra:'Mini-reto de datos (1 semana)',req:['Estudiante activo de Ingeniería o carrera afín','Interés en desarrollo web o análisis de datos','Disponibilidad de 4 h semanales'],
+ m:['Daniela Mora|dir|Presidenta|Coordinar charla de Data Science;Gestionar auditorio','Luis Andrade|dir|Tesorero|Cotizar licencias cloud','Kevin Salazar|mie|Dev Lead|Montar dashboard de métricas;Documentar API;Revisar PRs;Preparar demo;Actualizar sitio web','Paola Vera|mie|Analista de datos|Limpiar dataset del club;Redactar informe','Jorge Peña|mie|Diseño UX|Diseñar flyer','Camila Ruiz|inv|Aspirante|','Mateo Cruz|inv|Aspirante|'],
+ ev:[{nombre:'Reunión de directiva',fecha:'2026-11-05',detalles:'Jueves 19:00'},{nombre:'Workshop de Pandas y Visualización',fecha:'2026-11-12',detalles:'Lab 3 · 15:00'}]},
+mecatronica:{id:'mecatronica',n:'Mecatrónica',tipo:'Club',area:'IoT y Robótica',ic:'cpu',c:['#10b981','#14b8a6'],pw:'meca123',extra:'Prueba práctica de circuitos',req:['Estudiante activo de Ingeniería','Nociones de electrónica o programación (Arduino/ESP32)','Haber asistido a un workshop del club'],
+ m:['Joel Briones|dir|Presidente|Confirmar salón del workshop;Coordinar ponentes','Mariana Yagual|dir|Secretaria|Entregar solicitud a Bienestar','Andrés Lima|mie|Líder IoT|Contar sensores;Hoja de préstamos;Imprimir certificados;Armar kits','Sofía Quinde|mie|Robótica|Calibrar servos','Carlos Pita|mie|Electrónica|','Valeria Soto|inv|Aspirante|','Diego Mena|inv|Aspirante|'],
+ ev:[{nombre:'Workshop de IoT con ESP32',fecha:'2026-11-07',detalles:'Auditorio principal · 09:00'},{nombre:'Inventario de bodega',fecha:'2026-11-14',detalles:'Sábado 10:00'}]},
+ras:{id:'ras',n:'IEEE RAS',tipo:'Capítulo',area:'Robótica y Automatización',ic:'bot',c:['#0ea5e9','#6366f1'],pw:'ras123',extra:'Entrevista con la directiva',req:['Estudiante universitario de Ingeniería','Membresía IEEE estudiantil vigente','Promedio mínimo de 8/10'],
+ m:['Fernanda Loor|dir|Chair|Planificar competencia de robots;Enviar informe a IEEE','Ricardo Nieto|dir|Vice Chair|Gestionar auspicios','Pedro Zambrano|mie|Líder de proyectos|Armar brazo robótico;Probar ROS 2;Documentar avances','Ivana Chávez|mie|Comunicaciones|Publicar convocatoria','Bruno Alcívar|mie|Tesorería|Rendir cuentas del trimestre','Gabriela Mero|inv|Aspirante|','Esteban Ríos|inv|Aspirante|'],
+ ev:[{nombre:'Taller de ROS 2',fecha:'2026-11-10',detalles:'Lab de Robótica · 14:00'},{nombre:'Reunión mensual IEEE RAS',fecha:'2026-11-20',detalles:'Virtual'}]},
+asme:{id:'asme',n:'ASME',tipo:'Capítulo',area:'Ingeniería Mecánica',ic:'cog',c:['#f59e0b','#f97316'],pw:'asme123',extra:'Presentación breve de portafolio',req:['Estudiante de Ing. Mecánica o carrera afín','Membresía ASME estudiantil','Disponibilidad para proyectos de diseño'],
+ m:['Andrea Chiriboga|dir|Presidenta|Organizar visita a planta;Coordinar jurado','Marco Terán|dir|Tesorero|Cotizar materiales','Nicolás Pazmiño|mie|Líder de diseño|Modelar CAD del prototipo;Simulación FEA;Elaborar planos','Lucía Bravo|mie|Logística|Reservar transporte','Héctor Vélez|mie|Manufactura|','Romina Fiallos|inv|Aspirante|','Alex Burgos|inv|Aspirante|'],
+ ev:[{nombre:'Visita industrial a planta',fecha:'2026-11-18',detalles:'Salida 07:00'},{nombre:'Concurso de diseño mecánico',fecha:'2026-11-27',detalles:'Auditorio de Ingeniería'}]}};
+const ROLES={dir:['Directivo','border-violet-400/40 bg-violet-500/15 text-violet-300'],mie:['Miembro','border-emerald-400/40 bg-emerald-500/15 text-emerald-300'],inv:['Invitado','border-amber-400/40 bg-amber-500/15 text-amber-300']};
+const TABS=[['info','Inicio','home','dir mie inv'],['com','Comunidad','users','dir mie inv'],['carga','Carga de trabajo','bar-chart-3','dir'],['mis','Mis tareas','list-checks','dir mie'],['ideas','Ideas','lightbulb','dir mie'],['ia','WhatsApp + IA','sparkles','dir']];
+const GR=[['dir','Directiva','shield-check'],['mie','Miembros activos','users'],['inv','Invitados / Aspirantes','user-plus']],MES='enero febrero marzo abril mayo junio julio agosto septiembre octubre noviembre diciembre'.split(' ');
+/* ---------- Estado ---------- */
+const S={org:'taws',role:null,user:null,tab:'info',live:false,m:[],ev:[],quejas:[],extraT:[],extraE:[],done:new Set(),acc:{dir:true,mie:true,inv:false},cal:new Date(),files:{},prev:null,busy:'',err:'',ideas:[],apply:null};
+const O=()=>ORGS[S.org],act=()=>S.m.filter(x=>x.w),tasksOf=u=>[...u.tareas,...S.extraT.filter(t=>t.u===u.name)],ratio=u=>tasksOf(u).length/u.w;
+function st(){const a=act(),r=a.map(ratio),avg=r.reduce((p,c)=>p+c,0)/(r.length||1);return{avg,max:Math.max(0,...r),over:a.filter(u=>avg>0&&ratio(u)>avg*1.5),low:[...a].sort((x,y)=>ratio(x)-ratio(y))[0]}}
+function pd(s){s=String(s||'');if(/^\d{4}-\d\d-\d\d/.test(s))return new Date(s.slice(0,10)+'T00:00');const m=s.toLowerCase().match(/(\d{1,2})\s*(?:de\s*)?([a-záéíóú]{3,})/);if(!m)return null;const i=MES.findIndex(x=>x.startsWith(m[2].slice(0,3))),y=(s.match(/\b(20\d\d)\b/)||[])[1]||new Date().getFullYear();return i<0?null:new Date(+y,i,+m[1])}
+const evs=()=>[...S.ev,...S.extraE].map(e=>({...e,d:pd(e.fecha)})).sort((a,b)=>(a.d||1e15)-(b.d||1e15));
+const av=(n,c='h-10 w-10')=>{const g=['from-violet-500 to-indigo-500','from-emerald-500 to-teal-500','from-fuchsia-500 to-violet-500','from-sky-500 to-indigo-500','from-amber-500 to-orange-500','from-rose-500 to-pink-500'][[...n].reduce((a,c)=>a+c.charCodeAt(0),0)%6];return `<span class="${c} flex shrink-0 items-center justify-center rounded-full bg-gradient-to-br ${g} text-sm font-bold text-white">${esc(n[0]||'?')}</span>`};
+const badge=r=>`<span class="rounded-full border px-2 py-0.5 text-xs ${ROLES[r][1]}">${ROLES[r][0]}</span>`;
+const stat=(i,t,v,c='tx-a')=>`<div class="card flex items-center gap-3 p-4"><i data-lucide="${i}" class="${c}"></i><div><p class="text-2xl font-bold text-white">${v}</p><p class="text-xs text-slate-400">${t}</p></div></div>`;
+const theme=()=>{const[a,b]=O().c;document.documentElement.style.setProperty('--a1',a);document.documentElement.style.setProperty('--a2',b)};
+
+async function loadOrg(id){S.org=id;const o=O();Object.assign(S,{m:o.m.map(P),ev:structuredClone(o.ev),quejas:[],extraT:[],extraE:[],live:false});
+ try{if(!(await API.conectar()))throw 0;const d=await API.dashboard(id);S.live=true;if(d.usuarios.some(u=>u.tareas.length)||d.eventos.length){S.m=[...d.usuarios.map(u=>({name:u.name,g:u.role==='Admin'?'dir':'mie',cargo:u.role,w:u.role==='Admin'?3:u.role==='Novato'?1:2,tareas:u.tareas})),...S.m.filter(x=>x.g==='inv')];S.ev=d.eventos;S.quejas=d.quejas}}catch{}
+ S.correo=null;if(S.live){try{S.correo=await API.correo()}catch{}}
+ theme();const f=evs().find(e=>e.d);S.cal=f?new Date(f.d.getFullYear(),f.d.getMonth(),1):new Date()}
+function detect(){const o=ORGS[$('#u').value.trim().toLowerCase().split('.')[0]];$('#det').textContent=o?`✓ Detectado: ${o.n} · ${o.tipo} — ${o.area}`:'';if(o){document.documentElement.style.setProperty('--a1',o.c[0]);document.documentElement.style.setProperty('--a2',o.c[1])}}
+const fill=id=>{$('#u').value=id;$('#p').value=ORGS[id].pw;detect()};
+async function login(e){e.preventDefault();const[k,r]=$('#u').value.trim().toLowerCase().split('.'),o=ORGS[k];if(!o||$('#p').value!==o.pw){$('#err').classList.remove('hidden');return}await enter(r==='mie'?'mie':'dir',k)}
+async function enter(role,org=S.org){if(org!==S.org||!S.m.length)await loadOrg(org);S.role=role;S.user=role==='inv'?null:(S.m.find(x=>x.g===role)||{}).name;S.tab=S.tab&&TABS.find(t=>t[0]===S.tab&&t[3].includes(role))&&S.role?S.tab:'info';if(!TABS.find(t=>t[0]===S.tab&&t[3].includes(role)))S.tab='info';
+ $('#login').classList.add('hidden');$('#app').classList.remove('hidden');$('#rolesel').value=role;render(true)}
+function logout(){S.role=null;S.m=[];S.apply=null;drawModal();$('#app').classList.add('hidden');$('#login').classList.remove('hidden')}
+const go=t=>{S.tab=t;render(true)};
+function render(anim){const o=O();
+ $('#orgbar').innerHTML=`<div class="grad flex h-11 w-11 items-center justify-center rounded-xl"><i data-lucide="${o.ic}" class="text-white"></i></div><div><p class="font-semibold leading-tight text-white">${o.n} <span class="text-xs font-normal text-slate-400">· ${o.tipo}</span></p><p class="text-xs text-slate-400">${o.area}</p></div>`;
+ $('#conn').innerHTML=(S.live?'<span class="text-emerald-400">● API conectada</span>':`<span class="text-amber-400" title="${esc(API.diag.join(' | '))}">● Modo demo (sin servidor)</span>`)+(S.role==='dir'&&S.correo?(S.correo.listo?` <span class="text-emerald-400">· Correo listo (${esc(S.correo.via)})</span>`:` <span class="text-rose-400" title="${esc(S.correo.problema)}">· Correo sin configurar</span>`):'');
+ $('#me').innerHTML=(S.user?av(S.user,'h-8 w-8')+`<span class="hidden text-sm text-white sm:inline">${esc(S.user)}</span>`:'')+badge(S.role)+(S.role==='inv'?'<button class="btn-p !py-1" onclick="openApply()">Quiero ser miembro</button>':'');
+ $('#nav').innerHTML=TABS.filter(t=>t[3].includes(S.role)).map(t=>`<button onclick="go('${t[0]}')" class="btn !justify-start whitespace-nowrap ${S.tab===t[0]?'soft tx-a ring-1 bd-a':'text-slate-400 hover:bg-white/5'}"><i data-lucide="${t[2]}" class="h-4 w-4"></i>${t[1]}</button>`).join('');
+ $('#pane').innerHTML=`<div class="${anim?'pane':''} space-y-4">${V[S.tab]()}</div>`;lucide.createIcons()}
+
+const row=(x,s)=>{const r=x.w?ratio(x):0,k=!x.w?0:r>s.avg*1.5?2:r>s.avg*1.15?1:0,[lb,cl]=[['Equilibrada','text-emerald-300'],['Carga alta','text-amber-300'],['Sobrecarga','text-rose-300']][k];
+ const right=x.g==='inv'?(S.role==='dir'?`<button class="btn-g !px-2 !py-1 text-xs" onclick="admit('${esc(x.name)}')">Admitir</button>`:'<span class="text-xs text-amber-300">En revisión</span>'):S.role==='inv'?'':`<div class="w-20 text-right"><p class="text-[10px] ${cl}">${lb}</p><div class="mt-0.5 h-1.5 rounded-full bg-white/10"><div class="bar h-full rounded-full ${k===2?'bg-rose-500':'grad'}" style="width:${s.max?r/s.max*100:0}%"></div></div></div>`;
+ return `<div class="flex items-center gap-2 rounded-lg p-2 hover:bg-white/5">${av(x.name,'h-8 w-8')}<div class="min-w-0 flex-1"><p class="truncate text-sm text-white">${esc(x.name)}</p><p class="truncate text-xs text-slate-400">${esc(x.cargo)}</p></div>${right}</div>`};
+function tg(g,b){S.acc[g]=!S.acc[g];const d=b.nextElementSibling;d.classList.toggle('max-h-0',!S.acc[g]);d.classList.toggle('max-h-[40rem]',S.acc[g]);b.querySelector('.chev').classList.toggle('rotate-180',S.acc[g])}
+function accordion(){const s=st();return GR.map(([g,t,i])=>{const l=S.m.filter(x=>x.g===g);return `<div class="rounded-xl border border-white/10"><button onclick="tg('${g}',this)" class="flex w-full items-center gap-2 p-3 text-left text-sm font-medium text-white" aria-expanded="${S.acc[g]}"><i data-lucide="${i}" class="h-4 w-4 tx-a"></i>${t}<span class="ml-auto rounded-full bg-white/10 px-2 text-xs">${l.length}</span><i data-lucide="chevron-down" class="chev h-4 w-4 transition-transform duration-300 ${S.acc[g]?'rotate-180':''}"></i></button><div class="overflow-hidden transition-all duration-300 ${S.acc[g]?'max-h-[40rem]':'max-h-0'}"><div class="space-y-1 p-2 pt-0">${l.map(x=>row(x,s)).join('')||'<p class="p-2 text-xs text-slate-500">Sin registros</p>'}</div></div></div>`}).join('')}
+function calendar(){const d=S.cal,y=d.getFullYear(),m=d.getMonth(),first=(new Date(y,m,1).getDay()+6)%7,n=new Date(y,m+1,0).getDate(),all=evs(),t=new Date();let c='<div></div>'.repeat(first);
+ for(let k=1;k<=n;k++){const es=all.filter(e=>e.d&&e.d.getFullYear()===y&&e.d.getMonth()===m&&e.d.getDate()===k),now=t.getFullYear()===y&&t.getMonth()===m&&t.getDate()===k;
+  c+=`<div class="min-h-[3.5rem] rounded-xl border p-1.5 text-xs ${es.length?'bd-a soft':'border-white/5 bg-white/[.02]'}"><span class="${now?'font-bold text-emerald-400':'text-slate-400'}">${k}</span>${es.map(e=>`<div class="grad mt-1 truncate rounded px-1 text-[10px] text-white" title="${esc(e.nombre)}">${esc(e.nombre)}</div>`).join('')}</div>`}
+ return `<div class="card p-4"><div class="mb-3 flex items-center justify-between"><button class="btn-g !px-2" onclick="mv(-1)" aria-label="Mes anterior"><i data-lucide="chevron-left" class="h-4 w-4"></i></button><h3 class="font-semibold capitalize text-white">${MES[m]} ${y}</h3><button class="btn-g !px-2" onclick="mv(1)" aria-label="Mes siguiente"><i data-lucide="chevron-right" class="h-4 w-4"></i></button></div>
+ <div class="mb-1 grid grid-cols-7 gap-1 text-center text-xs text-slate-500">${'L M X J V S D'.split(' ').map(x=>`<div>${x}</div>`).join('')}</div><div class="grid grid-cols-7 gap-1">${c}</div></div>
+ <div class="grid gap-4 xl:grid-cols-2"><div class="card space-y-2 p-4"><h3 class="font-semibold text-white">Próximas actividades</h3>${all.map(e=>`<div class="rounded-xl bg-white/5 p-3 text-sm"><b class="text-white">${esc(e.nombre)}</b> <span class="text-emerald-300">· ${e.d?e.d.toLocaleDateString('es',{day:'numeric',month:'short',year:'numeric'}):esc(e.fecha||'Fecha por confirmar')}</span><p class="text-xs text-slate-400">${esc(e.detalles)}</p></div>`).join('')||'<p class="text-sm text-slate-500">Aún no hay actividades. Súbelas desde WhatsApp + IA o créalas manualmente.</p>'}</div>
+ ${S.role==='dir'?`<form class="card space-y-2 p-4" onsubmit="addEv(event)"><h3 class="font-semibold text-white">Nueva actividad</h3><input id="en" class="inp" placeholder="Nombre" required><input id="ef" type="date" class="inp" required><input id="ed" class="inp" placeholder="Detalles"><button class="btn-p"><i data-lucide="plus" class="h-4 w-4"></i>Agregar</button></form>`:''}</div>`}
+
+const V={
+info(){const o=O(),up=evs().filter(e=>e.d&&e.d>=new Date(new Date().toDateString())).length;return `
+ <div class="card p-6"><span class="rounded-full border bd-a soft px-2 py-0.5 text-xs tx-a">${o.tipo}</span><h2 class="mt-2 text-2xl font-bold text-white">${o.n}</h2><p class="text-slate-400">${o.area}</p>
+ <div class="mt-4 grid gap-3 md:grid-cols-2"><div class="soft rounded-xl p-4"><b class="tx-a">Misión</b><p class="mt-1 text-sm">Impulsar ${o.area.toLowerCase()} mediante proyectos, talleres y trabajo colaborativo.</p></div><div class="rounded-xl bg-white/5 p-4"><b class="text-emerald-300">Visión</b><p class="mt-1 text-sm">Ser una comunidad de referencia donde la carga de trabajo se reparte de forma justa.</p></div></div></div>
+ ${S.role==='inv'?`<div class="card bd-a soft flex flex-wrap items-center justify-between gap-4 border-2 p-6"><div><h3 class="text-lg font-semibold text-white">¿Quieres formar parte de ${o.n}?</h3><p class="text-sm text-slate-300">Conoce los requisitos y postula en minutos.</p></div><button class="btn-p" onclick="openApply()"><i data-lucide="user-plus" class="h-4 w-4"></i>Quiero ser miembro</button></div>`:''}
+ <div class="grid gap-3 sm:grid-cols-3">${stat('users','Miembros activos',act().length)}${stat('calendar-days','Actividades próximas',up,'text-emerald-300')}${stat('list-checks','Tareas activas',act().reduce((a,u)=>a+tasksOf(u).length,0),'text-emerald-300')}</div>`},
+com(){return `<div class="grid gap-4 lg:grid-cols-[21rem_1fr]"><div class="card space-y-2 self-start p-3"><h2 class="px-1 font-semibold text-white">Integrantes</h2>${accordion()}</div><div class="min-w-0 space-y-4">${calendar()}</div></div>`},
+carga(){const s=st(),a=act();return `<div class="grid gap-3 sm:grid-cols-3">${stat('gauge','Carga promedio',s.avg.toFixed(2))}${stat('alert-triangle','Sobrecargados',s.over.length,s.over.length?'text-rose-400':'text-emerald-300')}${stat('list-checks','Tareas totales',a.reduce((x,u)=>x+tasksOf(u).length,0),'text-emerald-300')}</div>
+ ${s.over.length?`<div class="card border-rose-400/30 p-4 text-sm text-rose-200">⚠️ ${s.over.map(u=>esc(u.name)).join(', ')} supera(n) 1.5× el promedio. Sugerencia: reasignar a <b>${esc(s.low.name)}</b> (menor carga relativa a su rol).</div>`:''}
+ <div class="card space-y-4 p-5"><h3 class="font-semibold text-white">Distribución por integrante <span class="text-xs font-normal text-slate-400">(tareas ÷ capacidad del rol)</span></h3>${a.map(u=>{const r=ratio(u),o=s.over.includes(u);return `<div><div class="mb-1 flex items-center justify-between text-sm"><span class="flex items-center gap-2">${av(u.name,'h-6 w-6')}${esc(u.name)} <span class="text-xs text-slate-500">${esc(u.cargo)}</span></span><span class="text-slate-400">${tasksOf(u).length} tareas · ${r.toFixed(2)}</span></div><div class="h-2.5 overflow-hidden rounded-full bg-white/10"><div class="bar h-full rounded-full ${o?'bg-gradient-to-r from-rose-500 to-orange-400':'grad'}" style="width:${s.max?r/s.max*100:0}%"></div></div></div>`}).join('')}</div>
+ <form class="card grid gap-2 p-4 sm:grid-cols-[12rem_1fr_auto]" onsubmit="addT(event)"><select id="tu" class="inp">${a.map(u=>`<option>${esc(u.name)}</option>`).join('')}</select><input id="tt" class="inp" placeholder="Asignar tarea manual…" required><button class="btn-p">Asignar</button></form>
+ ${S.quejas.length?`<div class="card p-4"><h3 class="mb-2 font-semibold text-white">Quejas y sugerencias detectadas</h3><ul class="ml-4 list-disc text-sm text-slate-300">${S.quejas.map(q=>`<li>${esc(q)}</li>`).join('')}</ul></div>`:''}`},
+mis(){const u=S.m.find(x=>x.name===S.user);if(!u)return '<div class="card p-4">Sin tareas asignadas.</div>';const t=tasksOf(u),s=st(),r=ratio(u),hi=r>s.avg*1.5;return `
+ <div class="card flex flex-wrap items-center gap-4 p-5">${av(u.name,'h-14 w-14')}<div class="flex-1"><h2 class="text-xl font-bold text-white">Mis cargas y tareas</h2><p class="text-sm ${hi?'text-rose-300':'text-emerald-300'}">${hi?'Tu carga supera el promedio del equipo.':'Tu carga está dentro de lo equilibrado.'}</p></div><div class="text-right"><p class="text-3xl font-bold text-white">${t.length}</p><p class="text-xs text-slate-400">tareas activas</p></div></div>
+ <div class="card divide-y divide-white/5">${t.map((x,i)=>{const k=u.name+i,d=S.done.has(k);return `<label class="flex cursor-pointer items-center gap-3 p-4 text-sm"><input type="checkbox" class="h-4 w-4 accent-emerald-500" ${d?'checked':''} onchange="S.done.has('${k}')?S.done.delete('${k}'):S.done.add('${k}');render()"><span class="${d?'text-slate-500 line-through':''}">${esc(x.descripcion)}</span>${x.auto?'<span class="ml-auto rounded bg-indigo-500/20 px-1.5 text-[10px] text-indigo-300">auto-asignada</span>':''}</label>`}).join('')||'<p class="p-4 text-sm text-slate-500">Sin tareas 🎉</p>'}</div>`},
+ideas(){return `<form class="card flex gap-2 p-4" onsubmit="addI(event)"><input id="it" class="inp" placeholder="Propón una idea para ${O().n}…" required><button class="btn-p">Proponer</button></form>
+ <div class="grid gap-3 sm:grid-cols-2">${S.ideas.map((x,i)=>`<div class="card flex items-center justify-between gap-3 p-4"><div><p class="font-medium text-white">${esc(x.t)}</p><p class="text-xs text-slate-400">por ${esc(x.by)}</p></div><button class="btn-g" onclick="S.ideas[${i}].v++;render()"><i data-lucide="thumbs-up" class="h-4 w-4"></i>${x.v}</button></div>`).join('')||'<p class="text-sm text-slate-500">Aún no hay ideas. ¡Sé el primero!</p>'}</div>`},
+ia(){const f=S.files,p=S.prev,chip=(k,i)=>f[k]?`<span class="soft flex items-center gap-1 rounded-lg px-2 py-1 text-xs"><i data-lucide="${i}" class="h-3 w-3"></i>${esc(f[k].name)}<button onclick="S.files.${k}=null;render()" aria-label="Quitar">✕</button></span>`:'';return `
+ <div class="card p-5"><h2 class="mb-1 flex items-center gap-2 text-lg font-semibold text-white"><i data-lucide="sparkles" class="tx-a"></i>Ingesta WhatsApp + Gemma 4</h2><p class="mb-3 text-sm text-slate-400">Arrastra el historial <b>.txt</b> y/o un flyer <b>.png/.jpg</b>. La IA cruza texto e imagen.</p>
+ <label ondragover="event.preventDefault()" ondrop="drop(event)" class="soft bd-a flex cursor-pointer flex-col items-center gap-2 rounded-2xl border-2 border-dashed p-8 text-center transition hover:brightness-125"><i data-lucide="upload-cloud" class="h-8 w-8 tx-a"></i><span class="text-sm">Suelta archivos aquí o haz clic para elegir</span><input type="file" multiple accept=".txt,image/png,image/jpeg" class="hidden" onchange="pick(this.files)"></label>
+ <div class="mt-3 flex flex-wrap items-center gap-2">${chip('chat','file-text')}${chip('flyer','image')}<button class="btn-p ml-auto" onclick="analyze()" ${(!f.chat&&!f.flyer)||S.busy?'disabled':''}>${S.busy?esc(S.busy):'Analizar con Gemma 4'}</button></div>${S.err?`<p class="mt-2 text-sm text-rose-400">${esc(S.err)}</p>`:''}</div>
+ ${p?`<div class="pane card space-y-4 p-5"><div class="flex flex-wrap items-center justify-between gap-2"><h3 class="font-semibold text-white">Compromisos extraídos</h3><span class="text-xs ${S.live?'text-emerald-400':'text-amber-400'}">${S.live?'Ya guardados en SQLite':'Vista previa · demo'}</span></div>
+  <div class="grid gap-2 sm:grid-cols-2">${p.tareas.map(t=>`<div class="rounded-xl bg-white/5 p-3 text-sm"><span class="text-xs ${t.responsable?'text-emerald-300':'text-amber-300'}">${esc(t.responsable||'Sin responsable → se reparte automáticamente')}</span><p>${esc(t.descripcion)}</p></div>`).join('')}</div>
+  ${p.eventos.map(e=>`<div class="soft rounded-xl p-3 text-sm"><b class="text-white">📅 ${esc(e.nombre)}</b> · ${esc(e.fecha)}<p class="text-xs text-slate-400">${esc(e.detalles)}</p></div>`).join('')}
+  ${p.quejas_sugerencias.map(q=>`<p class="text-sm text-slate-300">💬 ${esc(q)}</p>`).join('')}
+  <button class="btn-p" onclick="confirmIA()"><i data-lucide="check" class="h-4 w-4"></i>${S.live?'Ver reparto en el dashboard':'Confirmar y distribuir'}</button></div>`:''}`}};
+
+/* ---------- Acciones ---------- */
+const mv=d=>{S.cal=new Date(S.cal.getFullYear(),S.cal.getMonth()+d,1);render()};
+const addEv=e=>{e.preventDefault();S.extraE.push({nombre:$('#en').value,fecha:$('#ef').value,detalles:$('#ed').value});render()};
+const addT=e=>{e.preventDefault();S.extraT.push({u:$('#tu').value,descripcion:$('#tt').value,auto:false});render()};
+const addI=e=>{e.preventDefault();S.ideas.unshift({t:$('#it').value,by:S.user||'Anónimo',v:0});render()};
+function admit(n){const x=S.m.find(m=>m.name===n);Object.assign(x,{g:'mie',cargo:'Novato',w:1});render()}
+function openApply(){S.apply={ok:false};drawModal()}
+function closeApply(){S.apply=null;drawModal()}
+function drawModal(){const m=$('#modal'),o=O();if(!S.apply){m.classList.add('hidden');m.classList.remove('flex');return}m.classList.remove('hidden');m.classList.add('flex');
+ const pasos=['Completa el formulario de postulación','La directiva revisa tu perfil',o.extra,'Bienvenida y primeras tareas (rol Novato)'];
+ m.innerHTML=`<div class="absolute inset-0 bg-black/70 backdrop-blur-sm" onclick="closeApply()"></div><div class="card pane relative max-h-[90vh] w-full max-w-2xl overflow-y-auto !bg-slate-900/95 p-6" role="dialog" aria-modal="true">
+ <button class="btn-g absolute right-3 top-3 !px-2" onclick="closeApply()" aria-label="Cerrar"><i data-lucide="x" class="h-4 w-4"></i></button>
+ <div class="mb-4 flex items-center gap-3"><div class="grad flex h-11 w-11 items-center justify-center rounded-xl"><i data-lucide="${o.ic}" class="text-white"></i></div><div><h2 class="text-xl font-bold text-white">Quiero ser miembro</h2><p class="text-sm text-slate-400">${o.n} · ${o.tipo}</p></div></div>
+ ${S.apply.ok?`<div class="rounded-xl bg-emerald-500/10 p-6 text-center"><i data-lucide="check-circle-2" class="mx-auto mb-2 h-10 w-10 text-emerald-400"></i><p class="font-semibold text-white">${S.apply.mail==='demo'?'Postulación simulada':'¡Postulación enviada'}, ${esc(S.apply.n)}${S.apply.mail==='demo'?'':'!'}</p><p class="text-sm text-slate-400">${S.apply.mail===true?`La directiva de ${o.n} recibió tu solicitud por correo y la revisará.`:S.apply.mail==='demo'?'Esto es solo una simulación: la postulación no llegó a la directiva.':`Tu postulación quedó registrada y la directiva de ${o.n} la revisará.`} Ya apareces en <b>Invitados / Aspirantes</b>.</p>${S.apply.mail===false?`<p class="mt-2 text-xs text-amber-300">El aviso por correo a la directiva no se pudo enviar. ${esc(S.apply.det||'Ejecuta "python -m app.mailer" en el servidor para diagnosticarlo.')}</p>`:''}${S.apply.mail==='demo'?'<p class="mt-2 text-xs text-amber-300">No hay conexión con el servidor de ClubOS, por eso no se envió ningún correo. Inicia el servidor (uvicorn app.main:app --reload) y abre http://localhost:8000.</p>':''}<button class="btn-p mt-4" onclick="closeApply()">Listo</button></div>`:`
+ <div class="grid gap-4 sm:grid-cols-2"><div><h3 class="mb-2 text-sm font-semibold tx-a">Requisitos</h3><ul class="space-y-1.5 text-sm">${o.req.map(r=>`<li class="flex gap-2"><i data-lucide="check" class="mt-0.5 h-4 w-4 shrink-0 text-emerald-400"></i>${r}</li>`).join('')}</ul></div>
+ <div><h3 class="mb-2 text-sm font-semibold tx-a">Proceso de admisión</h3><ol class="space-y-1.5 text-sm">${pasos.map((p,i)=>`<li class="flex gap-2"><span class="grad flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs text-white">${i+1}</span>${p}</li>`).join('')}</ol></div></div>
+ <form class="mt-5 space-y-2 border-t border-white/10 pt-4" onsubmit="sendApply(event)"><div class="grid gap-2 sm:grid-cols-2"><input name="nombre" class="inp" placeholder="Nombre completo" required><input name="correo" type="email" class="inp" placeholder="Correo institucional" required></div><input name="carrera" class="inp" placeholder="Carrera y semestre" required><textarea name="motivacion" rows="3" class="inp" placeholder="¿Por qué quieres unirte a ${o.n}?" required></textarea><p id="apperr" class="hidden text-sm text-rose-400" role="alert"></p><button class="btn-p w-full">Enviar postulación</button></form>`}</div>`;lucide.createIcons()}
+async function sendApply(e){e.preventDefault();const f=Object.fromEntries(new FormData(e.target)),b=e.target.querySelector('button'),er=$('#apperr');er.classList.add('hidden');b.disabled=true;b.textContent='Enviando…';let mail='demo',det='';
+ if(!S.live&&await API.conectar())S.live=true;
+ if(S.live){try{const r=await API.postular({club:S.org,...f});mail=r.correo_enviado;det=r.detalle_correo||''}catch(x){er.textContent='No se pudo enviar: '+x.message;er.classList.remove('hidden');b.disabled=false;b.textContent='Enviar postulación';return}}
+ S.m.push({name:f.nombre,g:'inv',cargo:'Postulación en revisión',w:0,tareas:[]});S.apply={ok:true,n:f.nombre.split(' ')[0],mail,det};drawModal();render()}
+addEventListener('keydown',e=>e.key==='Escape'&&S.apply&&closeApply());
+function pick(list){for(const f of list){if(f.name.toLowerCase().endsWith('.txt'))S.files.chat=f;else if(/^image\/(png|jpe?g)$/.test(f.type))S.files.flyer=f;else S.err='Formato no soportado: '+f.name}render()}
+function drop(e){e.preventDefault();S.err='';pick(e.dataTransfer.files)}
+const MOCK={tareas:[{responsable:'',descripcion:'Diseñar flyer corregido del evento'},{responsable:'',descripcion:'Registrar préstamos de equipos'},{responsable:'',descripcion:'Enviar correo a ponentes con la hora corregida'}],eventos:[{nombre:'Evento detectado en flyer',fecha:'2026-11-21',detalles:'Revisar hora: el chat indica una distinta al afiche'}],quejas_sugerencias:['Las reuniones empiezan tarde: proponen puntualidad']};
+async function analyze(){const{chat,flyer}=S.files;S.err='';S.prev=null;S.busy='Gemma 4 analizando…';render();
+ try{if(S.live){const fd=new FormData();fd.append(chat?'chat':'flyer',chat||flyer);if(chat&&flyer)fd.append('flyer',flyer);S.prev=await API.upload(fd,!chat)}else{await sleep(1800);S.prev=structuredClone(MOCK)}}catch(e){S.err=e.message}S.busy='';render()}
+async function confirmIA(){if(S.live){const inv=S.m.filter(x=>x.g==='inv');await loadOrg(S.org);if(!S.m.some(x=>x.g==='inv'))S.m.push(...inv)}else{const p=S.prev;p.tareas.forEach(t=>{let u=act().find(x=>t.responsable&&x.name.toLowerCase().includes(t.responsable.toLowerCase())),auto=!u;u=u||[...act()].sort((a,b)=>ratio(a)-ratio(b))[0];S.extraT.push({u:u.name,descripcion:t.descripcion,auto})});S.extraE.push(...p.eventos);S.quejas.push(...p.quejas_sugerencias)}
+ S.prev=null;S.files={};S.tab='carga';render(true)}
+/* ---------- Init ---------- */
+$('#chips').innerHTML=Object.values(ORGS).map(o=>`<button type="button" onclick="fill('${o.id}')" class="btn-g !px-2 !py-1 text-xs">${o.n}</button>`).join('');
+$('#gorg').innerHTML=Object.values(ORGS).map(o=>`<option class="bg-slate-900" value="${o.id}">${o.n}</option>`).join('');
+lucide.createIcons();
+</script></body></html>
